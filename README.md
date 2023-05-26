@@ -1,4 +1,7 @@
-# grc: gorm redis based cache
+# grc: a simple gorm cache plugin based on redis
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/evangwt/grc)](https://goreportcard.com/report/github.com/evangwt/grc)[![GitHub release](https://img.shields.io/github/release/evangwt/grc.svg)](https://github.com/evangwt/grc/releases/)
+
 
 grc is a gorm plugin that provides a simple and flexible way to cache data using redis.
 
