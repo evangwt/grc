@@ -6,7 +6,7 @@ require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/stretchr/testify v1.8.1
 	gorm.io/driver/postgres v1.5.2
-	gorm.io/gorm v1.25.1
+	gorm.io/gorm v1.25.4
 )
 
 require (
