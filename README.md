@@ -69,20 +69,22 @@ To enable or disable the cache for a query, you can use the `grc.UseCacheKey` co
 
 ```go
 // use cache with default ttl
-db.Session(&gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, true)}).
-                Where("id > ?", 10).Find(&users)
+session := &gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, true)}
+db.Session(session).Where("id > ?", 10).Find(&users)
 
 // do not use cache
-db.Session(&gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, false)}).
-                Where("id > ?", 10).Find(&users)
+session := &gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, false)}
+db.Session(session).Where("id > ?", 10).Find(&users)
+// or
+db.Where("id > ?", 10).Find(&users)
 ```
 
 To set a custom ttl for a query, you can use the `grc.CacheTTLKey` context value with a time.Duration value. For example:
 
 ```go
 // use cache with custom ttl
-db.Session(&gorm.Session{Context: context.WithValue(context.WithValue(context.Background(), grc.UseCacheKey, true), grc.CacheTTLKey, 10*time.Second)}).
-                Where("id > ?", 5).Find(&users)
+session := &gorm.Session{Context: context.WithValue(context.WithValue(context.Background(), grc.UseCacheKey, true), grc.CacheTTLKey, 10*time.Second)}
+db.Session(session).Where("id > ?", 5).Find(&users)
 ```
 
 For more examples and details, please refer to the [example code](https://github.com/evangwt/grc/blob/main/example/main.go).
