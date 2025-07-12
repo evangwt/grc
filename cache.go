@@ -8,15 +8,17 @@ import (
 	"errors"
 	"gorm.io/gorm/callbacks"
 	"log"
+	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
 var (
 	UseCacheKey struct{}
 	CacheTTLKey struct{}
+	// ErrCacheMiss is returned when a cache key is not found
+	ErrCacheMiss = errors.New("cache miss")
 )
 
 // GormCache is a cache plugin for gorm
@@ -127,7 +129,7 @@ func (g *GormCache) cacheKey(db *gorm.DB) string {
 
 func (g *GormCache) loadCache(db *gorm.DB, key string) (bool, error) {
 	value, err := g.client.Get(db.Statement.Context, key)
-	if err != nil && !errors.Is(err, redis.Nil) {
+	if err != nil && !errors.Is(err, ErrCacheMiss) {
 		return false, err
 	}
 
@@ -169,34 +171,82 @@ func (g *GormCache) queryDB(db *gorm.DB) {
 	gorm.Scan(rows, db, 0)
 }
 
-// RedisClient is a wrapper for go-redis client
-type RedisClient struct {
-	client *redis.Client
+// Legacy RedisClient implementation removed
+// Use SimpleRedisClient or MemoryCache instead
+
+// MemoryCache is an in-memory cache implementation
+type MemoryCache struct {
+	data map[string]*cacheItem
+	mu   sync.RWMutex
 }
 
-// NewRedisClient returns a new RedisClient instance
-func NewRedisClient(client *redis.Client) *RedisClient {
-	return &RedisClient{
-		client: client,
+type cacheItem struct {
+	value  []byte
+	expiry time.Time
+}
+
+// NewMemoryCache creates a new in-memory cache instance
+func NewMemoryCache() *MemoryCache {
+	mc := &MemoryCache{
+		data: make(map[string]*cacheItem),
 	}
+	// Start cleanup goroutine
+	go mc.cleanup()
+	return mc
 }
 
-// Get gets value from redis by key using json encoding/decoding
-func (r *RedisClient) Get(ctx context.Context, key string) (interface{}, error) {
-	data, err := r.client.Get(ctx, key).Bytes()
-	if err != nil {
-		return nil, err
+// Get retrieves a value from the memory cache
+func (m *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	item, exists := m.data[key]
+	if !exists {
+		return nil, ErrCacheMiss
 	}
-	//log.Printf("get cache, key: %v", key)
-	return data, nil
+
+	// Check if expired
+	if time.Now().After(item.expiry) {
+		return nil, ErrCacheMiss
+	}
+
+	return item.value, nil
 }
 
-// Set sets value to redis by key with ttl using json encoding/decoding
-func (r *RedisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	//log.Printf("set cache, key: %v", key)
-	data, err := json.Marshal(value) // encode value to json bytes using json encoding/decoding
+// Set stores a value in the memory cache with TTL
+func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return r.client.Set(ctx, key, data, ttl).Err()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.data[key] = &cacheItem{
+		value:  data,
+		expiry: time.Now().Add(ttl),
+	}
+
+	return nil
+}
+
+// cleanup removes expired items from the cache
+func (m *MemoryCache) cleanup() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			m.mu.Lock()
+			now := time.Now()
+			for key, item := range m.data {
+				if now.After(item.expiry) {
+					delete(m.data, key)
+				}
+			}
+			m.mu.Unlock()
+		}
+	}
 }
