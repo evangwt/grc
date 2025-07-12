@@ -1,93 +1,163 @@
-# grc: a simple gorm cache plugin based on redis
+# grc: a simple gorm cache plugin
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/evangwt/grc)](https://goreportcard.com/report/github.com/evangwt/grc)[![GitHub release](https://img.shields.io/github/release/evangwt/grc.svg)](https://github.com/evangwt/grc/releases/)
 
-
-grc is a gorm plugin that provides a simple and flexible way to cache data using redis.
+grc is a gorm plugin that provides a simple and flexible way to cache data with **zero external dependencies**.
 
 ## Features
 
-- Easy to use: just add grc as a gorm plugin and use gorm session options to control the cache behavior.
-- Flexible to customize: you can configure the cache prefix, ttl, and redis client according to your needs.
+- **Zero external dependencies**: Use built-in memory cache or simple Redis client (no go-redis required)
+- **Easy to use**: just add grc as a gorm plugin and use gorm session options to control the cache behavior
+- **Flexible storage backends**: Choose from in-memory cache or simple Redis implementation
+- **Elegant API**: Simple context-based cache control
 
 ## Installation
 
-To use grc, you need to have gorm and go-redis installed. You can install them using go get:
+To use grc, you only need gorm installed:
 
 ```bash
 go get -u gorm.io/gorm
-go get -u github.com/go-redis/redis/v8
-```
-
-Then you can install grc using go get:
-
-```bash
 go get -u github.com/evangwt/grc
 ```
 
+No external cache dependencies required!
+
 ## Usage
 
-To use grc, you need to create a gorm cache instance with a redis client and a cache config, and then add it as a gorm plugin. For example:
+### Option 1: Memory Cache (Recommended for development)
 
 ```go
 package main
 
 import (
-        "github.com/evangwt/grc"
-        "github.com/go-redis/redis/v8"
-        "gorm.io/driver/postgres"
-        "gorm.io/gorm"
+    "context"
+    "time"
+    
+    "github.com/evangwt/grc"
+    "gorm.io/driver/sqlite"
+    "gorm.io/gorm"
 )
 
 func main() {
-        // connect to postgres database
-        dsn := "host='0.0.0.0' port='5432' user='evan' dbname='cache_test' password='' sslmode=disable TimeZone=Asia/Shanghai"
-        db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    // Connect to your database
+    db, _ := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
 
-        // connect to redis database
-        rdb := redis.NewClient(&redis.Options{
-                Addr:     "0.0.0.0:6379",
-                Password: "123456",
-        })
+    // Create cache with in-memory storage (no external dependencies!)
+    cache := grc.NewGormCache("my_cache", grc.NewMemoryCache(), grc.CacheConfig{
+        TTL:    60 * time.Second,
+        Prefix: "cache:",
+    })
 
-        // create a gorm cache instance with a redis client and a cache config
-        cache := grc.NewGormCache("my_cache", grc.NewRedisClient(rdb), grc.CacheConfig{
-                TTL:    60 * time.Second,
-                Prefix: "cache:",
-        })
+    // Add the cache plugin
+    if err := db.Use(cache); err != nil {
+        log.Fatal(err)
+    }
 
-        // add the gorm cache instance as a gorm plugin
-        if err := db.Use(cache); err != nil {
-                log.Fatal(err)
-        }
-
-        // now you can use gorm session options to control the cache behavior
+    // Use cache - simple and elegant!
+    var users []User
+    ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+    db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
 }
 ```
 
-To enable or disable the cache for a query, you can use the `grc.UseCacheKey` context value with a boolean value. For example:
+### Option 2: Simple Redis Client (No go-redis dependency)
 
 ```go
-// use cache with default ttl
-session := &gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, true)}
-db.Session(session).Where("id > ?", 10).Find(&users)
+package main
 
-// do not use cache
-session := &gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, false)}
-db.Session(session).Where("id > ?", 10).Find(&users)
-// or
+import (
+    "context"
+    "time"
+    
+    "github.com/evangwt/grc"
+    "gorm.io/gorm"
+)
+
+func main() {
+    // Connect to your database (omitted for brevity)
+    db, _ := gorm.Open(...)
+
+    // Create simple Redis client (no external dependencies!)
+    redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
+        Addr:     "localhost:6379",
+        Password: "", // optional
+        DB:       0,  // optional
+    })
+    if err != nil {
+        log.Fatal("Failed to connect to Redis:", err)
+    }
+    defer redisClient.Close()
+
+    // Create cache with Redis storage
+    cache := grc.NewGormCache("redis_cache", redisClient, grc.CacheConfig{
+        TTL:    60 * time.Second,
+        Prefix: "redis:",
+    })
+
+    // Add the cache plugin
+    if err := db.Use(cache); err != nil {
+        log.Fatal(err)
+    }
+
+    // Use cache
+    var users []User
+    ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+    db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
+}
+```
+
+## Cache Control
+
+### Enable/Disable Cache
+
+```go
+// Use cache with default TTL
+ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
+
+// Do not use cache
+ctx := context.WithValue(context.Background(), grc.UseCacheKey, false)
+db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
+// or simply
 db.Where("id > ?", 10).Find(&users)
 ```
 
-To set a custom ttl for a query, you can use the `grc.CacheTTLKey` context value with a time.Duration value. For example:
+### Custom TTL
 
 ```go
-// use cache with custom ttl
-session := &gorm.Session{Context: context.WithValue(context.WithValue(context.Background(), grc.UseCacheKey, true), grc.CacheTTLKey, 10*time.Second)}
-db.Session(session).Where("id > ?", 5).Find(&users)
+// Use cache with custom TTL
+ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+ctx = context.WithValue(ctx, grc.CacheTTLKey, 10*time.Second)
+db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 5).Find(&users)
 ```
 
-For more examples and details, please refer to the [example code](https://github.com/evangwt/grc/blob/main/example/main.go).
+## Migration from v1 (go-redis based)
+
+If you were using the previous version with go-redis, you can easily migrate:
+
+**Before (v1):**
+```go
+rdb := redis.NewClient(&redis.Options{
+    Addr:     "localhost:6379",
+    Password: "password",
+})
+cache := grc.NewGormCache("my_cache", grc.NewRedisClient(rdb), config)
+```
+
+**After (v2):**
+```go
+// Option 1: Use memory cache (no external dependencies)
+cache := grc.NewGormCache("my_cache", grc.NewMemoryCache(), config)
+
+// Option 2: Use simple Redis client (no go-redis dependency)
+redisClient, _ := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
+    Addr:     "localhost:6379",
+    Password: "password",
+})
+cache := grc.NewGormCache("my_cache", redisClient, config)
+```
+
+For more examples and details, please refer to the [example code](https://github.com/evangwt/grc/blob/main/example/).
 
 ## License
 

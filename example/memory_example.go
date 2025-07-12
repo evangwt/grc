@@ -13,7 +13,7 @@ import (
 
 func main() {
 	// Use SQLite for this example (no external dependencies needed)
-	db, err := gorm.Open(sqlite.Open("example.db"), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{
 		Logger: logger.New(
 			log.Default(),
 			logger.Config{
@@ -34,39 +34,15 @@ func main() {
 
 	db.AutoMigrate(User{})
 
-	// =====================================================
-	// NEW APPROACH: No external dependencies required!
-	// =====================================================
-	
-	// Option 1: Use MemoryCache (built-in, no dependencies)
-	memoryCache := grc.NewGormCache("memory_cache", grc.NewMemoryCache(), grc.CacheConfig{
+	// Create a GormCache with MemoryCache - no external dependencies!
+	cache := grc.NewGormCache("my_cache", grc.NewMemoryCache(), grc.CacheConfig{
 		TTL:    60 * time.Second,
-		Prefix: "mem:",
+		Prefix: "cache:",
 	})
 
-	if err := db.Use(memoryCache); err != nil {
+	if err := db.Use(cache); err != nil {
 		log.Fatal(err)
 	}
-
-	// Option 2: Use SimpleRedisClient (no go-redis dependency)
-	// redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
-	//     Addr: "localhost:6379",
-	//     Password: "", // optional
-	//     DB: 0,        // optional
-	// })
-	// if err != nil {
-	//     log.Fatal("Failed to connect to Redis:", err)
-	// }
-	// defer redisClient.Close()
-	// 
-	// redisCache := grc.NewGormCache("redis_cache", redisClient, grc.CacheConfig{
-	//     TTL:    60 * time.Second,
-	//     Prefix: "redis:",
-	// })
-	// 
-	// if err := db.Use(redisCache); err != nil {
-	//     log.Fatal(err)
-	// }
 
 	// Create some test data
 	for i := 1; i <= 10; i++ {
@@ -75,19 +51,27 @@ func main() {
 
 	var users []User
 
-	// Simple and elegant usage!
-	log.Println("=== Using cache with default TTL ===")
+	// Use cache with default TTL - simple and elegant!
+	log.Println("Querying with cache (first time - cache miss):")
 	db.Session(&gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, true)}).
 		Where("id > ?", 5).Find(&users)
 	log.Printf("Found %d users", len(users))
 
-	log.Println("=== Using cache with custom TTL ===")
+	// Query again - this time it will hit the cache
+	log.Println("Querying with cache (second time - cache hit):")
+	db.Session(&gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, true)}).
+		Where("id > ?", 5).Find(&users)
+	log.Printf("Found %d users (from cache)", len(users))
+
+	// Use cache with custom TTL
+	log.Println("Querying with custom TTL:")
 	ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
 	ctx = context.WithValue(ctx, grc.CacheTTLKey, 10*time.Second)
 	db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 3).Find(&users)
 	log.Printf("Found %d users with 10s TTL", len(users))
 
-	log.Println("=== Query without cache ===")
+	// Query without cache
+	log.Println("Querying without cache:")
 	db.Session(&gorm.Session{Context: context.WithValue(context.Background(), grc.UseCacheKey, false)}).
 		Where("id > ?", 5).Find(&users)
 	log.Printf("Found %d users (no cache)", len(users))
