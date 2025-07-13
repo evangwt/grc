@@ -67,8 +67,8 @@ func TestCache(t *testing.T) {
 
 	var err error
 
-	// Use the new MemoryCache instead of RedisClient
-	cache := NewGormCache("my_cache", NewMemoryCache(), CacheConfig{
+	// Use the test memory cache for testing
+	cache := NewGormCache("my_cache", newTestMemoryCache(), CacheConfig{
 		TTL:    60 * time.Second,
 		Prefix: "cache:",
 	})
@@ -131,7 +131,7 @@ func BenchmarkCache(b *testing.B) {
 		return
 	}
 
-	cache := NewGormCache("my_cache", NewMemoryCache(), CacheConfig{
+	cache := NewGormCache("my_cache", newTestMemoryCache(), CacheConfig{
 		TTL:    10 * time.Second,
 		Prefix: "cache:",
 	})

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/evangwt/grc"
+	"github.com/evangwt/grc/examples/implementations"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -34,8 +35,8 @@ func main() {
 
 	db.AutoMigrate(User{})
 
-	// Create a GormCache with MemoryCache - no external dependencies!
-	cache := grc.NewGormCache("my_cache", grc.NewMemoryCache(), grc.CacheConfig{
+	// Create a GormCache with reference MemoryCache implementation - no external dependencies!
+	cache := grc.NewGormCache("my_cache", implementations.NewMemoryCache(), grc.CacheConfig{
 		TTL:    60 * time.Second,
 		Prefix: "cache:",
 	})

@@ -87,7 +87,7 @@ func TestSimpleRedisClientIntegration(t *testing.T) {
 // implement the same CacheClient interface, showing the abstract design
 func TestCacheClientInterface(t *testing.T) {
 	// Test that both implementations satisfy the CacheClient interface
-	var memoryClient CacheClient = NewMemoryCache()
+	var memoryClient CacheClient = newTestMemoryCache()
 	var redisClient CacheClient
 
 	// Create a miniredis server for testing

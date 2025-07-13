@@ -9,7 +9,7 @@ import (
 )
 
 func TestMemoryCache(t *testing.T) {
-	cache := NewMemoryCache()
+	cache := newTestMemoryCache()
 
 	ctx := context.Background()
 	key := "test_key"
@@ -47,8 +47,8 @@ func TestMemoryCache(t *testing.T) {
 }
 
 func TestMemoryCacheIntegration(t *testing.T) {
-	// This test demonstrates the new elegant usage without external dependencies
-	cache := NewGormCache("test_cache", NewMemoryCache(), CacheConfig{
+	// This test demonstrates how to use custom cache implementations
+	cache := NewGormCache("test_cache", newTestMemoryCache(), CacheConfig{
 		TTL:    60 * time.Second,
 		Prefix: "test:",
 	})

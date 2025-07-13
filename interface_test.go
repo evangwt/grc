@@ -50,9 +50,9 @@ func TestAbstractCacheInterface(t *testing.T) {
 		}
 	}
 
-	// Test with MemoryCache
+	// Test with test memory cache
 	t.Run("MemoryCache", func(t *testing.T) {
-		memoryCache := NewMemoryCache()
+		memoryCache := newTestMemoryCache()
 		testCacheBehavior(t, memoryCache, "memory")
 	})
 
@@ -92,9 +92,9 @@ func TestGormCacheWithDifferentBackends(t *testing.T) {
 		assert.Implements(t, (*interface{ Name() string })(nil), cache)
 	}
 
-	// Test GormCache with MemoryCache backend
+	// Test GormCache with test memory cache backend
 	t.Run("WithMemoryCache", func(t *testing.T) {
-		memoryCache := NewMemoryCache()
+		memoryCache := newTestMemoryCache()
 		testGormCacheSetup(t, memoryCache, "memory")
 	})
 
@@ -135,9 +135,9 @@ func TestCacheClientErrorHandling(t *testing.T) {
 		assert.NotNil(t, result, "Result should not be nil")
 	}
 
-	// Test MemoryCache error handling
+	// Test test memory cache error handling
 	t.Run("MemoryCache", func(t *testing.T) {
-		memoryCache := NewMemoryCache()
+		memoryCache := newTestMemoryCache()
 		testErrorHandling(t, memoryCache, "memory")
 	})
 
