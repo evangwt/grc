@@ -10,13 +10,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
 var (
 	UseCacheKey struct{}
 	CacheTTLKey struct{}
+	// ErrCacheMiss is returned when a cache key is not found
+	ErrCacheMiss = errors.New("cache miss")
 )
 
 // GormCache is a cache plugin for gorm
@@ -127,7 +128,7 @@ func (g *GormCache) cacheKey(db *gorm.DB) string {
 
 func (g *GormCache) loadCache(db *gorm.DB, key string) (bool, error) {
 	value, err := g.client.Get(db.Statement.Context, key)
-	if err != nil && !errors.Is(err, redis.Nil) {
+	if err != nil && !errors.Is(err, ErrCacheMiss) {
 		return false, err
 	}
 
@@ -167,36 +168,4 @@ func (g *GormCache) queryDB(db *gorm.DB) {
 		db.AddError(rows.Close())
 	}()
 	gorm.Scan(rows, db, 0)
-}
-
-// RedisClient is a wrapper for go-redis client
-type RedisClient struct {
-	client *redis.Client
-}
-
-// NewRedisClient returns a new RedisClient instance
-func NewRedisClient(client *redis.Client) *RedisClient {
-	return &RedisClient{
-		client: client,
-	}
-}
-
-// Get gets value from redis by key using json encoding/decoding
-func (r *RedisClient) Get(ctx context.Context, key string) (interface{}, error) {
-	data, err := r.client.Get(ctx, key).Bytes()
-	if err != nil {
-		return nil, err
-	}
-	//log.Printf("get cache, key: %v", key)
-	return data, nil
-}
-
-// Set sets value to redis by key with ttl using json encoding/decoding
-func (r *RedisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	//log.Printf("set cache, key: %v", key)
-	data, err := json.Marshal(value) // encode value to json bytes using json encoding/decoding
-	if err != nil {
-		return err
-	}
-	return r.client.Set(ctx, key, data, ttl).Err()
 }
