@@ -15,7 +15,7 @@ grc is a simple and elegant gorm cache plugin with a clean interface design and 
 ## 📦 Installation
 
 ```bash
-go get -u github.com/evangwt/grc
+go get -u github.com/evangwt/grc/v2
 ```
 
 ## 🚀 Quick Start
@@ -28,7 +28,7 @@ package main
 import (
     "context"
     "time"
-    "github.com/evangwt/grc"
+    "github.com/evangwt/grc/v2"
     "gorm.io/gorm"
 )
 
@@ -118,7 +118,7 @@ import (
     "log"
     "time"
     
-    "github.com/evangwt/grc"
+    "github.com/evangwt/grc/v2"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
 )

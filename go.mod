@@ -1,4 +1,4 @@
-module github.com/evangwt/grc
+module github.com/evangwt/grc/v2
 
 go 1.18
 

@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/evangwt/grc"
+	"github.com/evangwt/grc/v2"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
