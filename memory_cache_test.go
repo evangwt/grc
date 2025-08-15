@@ -6,53 +6,80 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestMemoryCache(t *testing.T) {
-	cache := newTestMemoryCache()
+func TestNewMemoryCache(t *testing.T) {
+	cache := NewMemoryCache()
+	require.NotNil(t, cache)
+	defer cache.Close()
 
 	ctx := context.Background()
-	key := "test_key"
-	value := map[string]interface{}{
-		"id":   1,
-		"name": "test",
-	}
 
 	// Test cache miss
-	_, err := cache.Get(ctx, key)
+	_, err := cache.Get(ctx, "missing")
 	assert.Equal(t, ErrCacheMiss, err)
 
 	// Test set and get
-	err = cache.Set(ctx, key, value, time.Minute)
+	err = cache.Set(ctx, "key1", "value1", time.Minute)
 	assert.NoError(t, err)
 
-	result, err := cache.Get(ctx, key)
+	value, err := cache.Get(ctx, "key1")
 	assert.NoError(t, err)
-	assert.NotNil(t, result)
+	assert.Equal(t, []byte("\"value1\""), value) // JSON marshaled
 
-	// Test expiration
-	shortKey := "short_key"
-	err = cache.Set(ctx, shortKey, value, time.Millisecond*10)
+	// Test TTL expiration
+	err = cache.Set(ctx, "expiring", "value", time.Millisecond)
 	assert.NoError(t, err)
 
-	// Should get immediately
-	result, err = cache.Get(ctx, shortKey)
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
+	time.Sleep(2 * time.Millisecond)
+	_, err = cache.Get(ctx, "expiring")
+	assert.Equal(t, ErrCacheMiss, err)
 
-	// Wait for expiration
-	time.Sleep(time.Millisecond * 20)
-	_, err = cache.Get(ctx, shortKey)
+	// Test size
+	cache.Set(ctx, "size1", "value", time.Minute)
+	cache.Set(ctx, "size2", "value", time.Minute)
+	// expiring key might still be there until cleanup, so check that size is at least 3
+	assert.GreaterOrEqual(t, cache.Size(), 3) // key1 + size1 + size2 (expiring may still be there)
+}
+
+func TestMemoryCacheClose(t *testing.T) {
+	cache := NewMemoryCache()
+	require.NotNil(t, cache)
+
+	ctx := context.Background()
+
+	// Set a value
+	err := cache.Set(ctx, "key", "value", time.Minute)
+	assert.NoError(t, err)
+
+	// Close the cache
+	err = cache.Close()
+	assert.NoError(t, err)
+
+	// Operations after close should fail gracefully
+	err = cache.Set(ctx, "key2", "value2", time.Minute)
 	assert.Equal(t, ErrCacheMiss, err)
 }
 
-func TestMemoryCacheIntegration(t *testing.T) {
-	// This test demonstrates how to use custom cache implementations
-	cache := NewGormCache("test_cache", newTestMemoryCache(), CacheConfig{
-		TTL:    60 * time.Second,
-		Prefix: "test:",
-	})
+func TestMemoryCacheCleanup(t *testing.T) {
+	cache := NewMemoryCache()
+	require.NotNil(t, cache)
+	defer cache.Close()
 
-	assert.Equal(t, "test_cache", cache.Name())
-	assert.NotNil(t, cache.client)
+	ctx := context.Background()
+
+	// Set values with very short TTL
+	cache.Set(ctx, "short1", "value", time.Millisecond)
+	cache.Set(ctx, "short2", "value", time.Millisecond)
+	cache.Set(ctx, "long", "value", time.Hour)
+
+	// Wait for expiration
+	time.Sleep(2 * time.Millisecond)
+
+	// Trigger cleanup by calling cleanupExpired directly
+	cache.cleanupExpired()
+
+	// Only the long-lived item should remain
+	assert.Equal(t, 1, cache.Size())
 }

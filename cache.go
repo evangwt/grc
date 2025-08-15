@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"gorm.io/gorm/callbacks"
 	"log"
 	"time"
@@ -14,11 +16,23 @@ import (
 )
 
 var (
-	UseCacheKey struct{}
-	CacheTTLKey struct{}
+	// Context keys with proper typing for better type safety
+	UseCacheKey = &contextKey{"UseCache"}
+	CacheTTLKey = &contextKey{"CacheTTL"}
 	// ErrCacheMiss is returned when a cache key is not found
 	ErrCacheMiss = errors.New("cache miss")
+	// ErrCacheTimeout is returned when a cache operation times out
+	ErrCacheTimeout = errors.New("cache operation timeout")
 )
+
+// contextKey provides type safety for context keys
+type contextKey struct {
+	name string
+}
+
+func (c *contextKey) String() string {
+	return "grc context key " + c.name
+}
 
 // GormCache is a cache plugin for gorm
 type GormCache struct {
@@ -35,8 +49,9 @@ type CacheClient interface {
 
 // CacheConfig is a struct for cache options
 type CacheConfig struct {
-	TTL    time.Duration // cache expiration time
-	Prefix string        // cache key prefix
+	TTL           time.Duration // cache expiration time
+	Prefix        string        // cache key prefix
+	UseSecureHash bool          // use SHA256 instead of FNV (slower but collision-resistant)
 }
 
 // NewGormCache returns a new GormCache instance
@@ -72,38 +87,34 @@ func (g *GormCache) queryCallback(db *gorm.DB) {
 		return
 	}
 
-	var (
-		key string
-		err error
-		hit bool
-	)
+	// Handle caching logic
 	if enableCache {
-		key = g.cacheKey(db)
+		key := g.cacheKey(db)
 
-		// get value from cache
-		hit, err = g.loadCache(db, key)
+		// Try to load from cache first
+		hit, err := g.loadCache(db, key)
 		if err != nil {
-			log.Printf("load cache failed: %v, hit: %v", err, hit)
+			// Log cache error but don't fail the query
+			if !errors.Is(err, ErrCacheTimeout) {
+				log.Printf("load cache failed: %v", err)
+			}
+		} else if hit {
+			// Cache hit - return early
 			return
 		}
 
-		// hit cache
-		if hit {
-			return
-		}
-
-		// cache miss, continue database operation
-		//log.Printf("------------------------- miss cache, key: %v", key)
-	}
-
-	if !hit {
+		// Cache miss - execute query and cache result
 		g.queryDB(db)
-
-		if enableCache {
-			if err = g.setCache(db, key); err != nil {
+		
+		// Only cache if query was successful
+		if db.Error == nil {
+			if err = g.setCache(db, key); err != nil && !errors.Is(err, ErrCacheTimeout) {
 				log.Printf("set cache failed: %v", err)
 			}
 		}
+	} else {
+		// No caching - execute query directly
+		g.queryDB(db)
 	}
 }
 
@@ -120,15 +131,41 @@ func (g *GormCache) enableCache(db *gorm.DB) bool {
 
 func (g *GormCache) cacheKey(db *gorm.DB) string {
 	sql := db.Dialector.Explain(db.Statement.SQL.String(), db.Statement.Vars...)
-	hash := sha256.Sum256([]byte(sql))
-	key := g.config.Prefix + hex.EncodeToString(hash[:])
+	
+	var hash string
+	if g.config.UseSecureHash {
+		// Use SHA256 for collision resistance (slower)
+		h := sha256.Sum256([]byte(sql))
+		hash = hex.EncodeToString(h[:])
+	} else {
+		// Use FNV-1a for speed (faster, adequate for most use cases)
+		h := fnv.New64a()
+		h.Write([]byte(sql))
+		hash = fmt.Sprintf("%x", h.Sum64())
+	}
+	
+	key := g.config.Prefix + hash
 	//log.Printf("key: %v, sql: %v", key, sql)
 	return key
 }
 
 func (g *GormCache) loadCache(db *gorm.DB, key string) (bool, error) {
-	value, err := g.client.Get(db.Statement.Context, key)
-	if err != nil && !errors.Is(err, ErrCacheMiss) {
+	// Add timeout context for cache operations
+	ctx := db.Statement.Context
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+
+	value, err := g.client.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, ErrCacheMiss) {
+			return false, nil // Cache miss is not an error
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return false, ErrCacheTimeout
+		}
 		return false, err
 	}
 
@@ -138,7 +175,7 @@ func (g *GormCache) loadCache(db *gorm.DB, key string) (bool, error) {
 
 	// cache hit, scan value to destination
 	if err = json.Unmarshal(value.([]byte), &db.Statement.Dest); err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to unmarshal cached data: %w", err)
 	}
 	db.RowsAffected = int64(db.Statement.ReflectValue.Len())
 	return true, nil
@@ -154,8 +191,19 @@ func (g *GormCache) setCache(db *gorm.DB, key string) error {
 	}
 	//log.Printf("ttl: %v", ttl)
 
+	// Add timeout context for cache operations
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+
 	// set value to cache with ttl
-	return g.client.Set(ctx, key, db.Statement.Dest, ttl)
+	err := g.client.Set(ctx, key, db.Statement.Dest, ttl)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return ErrCacheTimeout
+	}
+	return err
 }
 
 func (g *GormCache) queryDB(db *gorm.DB) {

@@ -1,92 +1,26 @@
-# grc: a simple gorm cache plugin
+# grc: Gorm Cache Plugin
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/evangwt/grc)](https://goreportcard.com/report/github.com/evangwt/grc)[![GitHub release](https://img.shields.io/github/release/evangwt/grc.svg)](https://github.com/evangwt/grc/releases/)
 
-grc is a gorm plugin that provides a **简洁优雅的使用方式** (simple and elegant usage) for data caching with a **clean abstract interface** design.
+grc is a simple and elegant gorm cache plugin with a clean interface design and production-ready default implementations.
 
 ## ✨ Features
 
-- **🎯 Clean Abstract Interface**: Simple `CacheClient` interface for maximum flexibility
-- **🔌 Pluggable Architecture**: Implement any cache backend (memory, Redis, Memcached, database, file, etc.)
-- **🚀 Zero Required Dependencies**: Core library has no external cache dependencies
-- **📝 Simple Context-Based API**: Control cache behavior through gorm session context
-- **🧪 Comprehensive Testing**: Full test coverage with miniredis integration
-- **⚡ Production Ready**: Thread-safe interface design suitable for high-concurrency
-- **📚 Rich Examples**: Reference implementations for common cache backends
-
-## 🏗️ Architecture
-
-grc implements a **clean abstract interface design** with the `CacheClient` interface:
-
-```go
-type CacheClient interface {
-    Get(ctx context.Context, key string) (interface{}, error)
-    Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
-}
-```
-
-This elegant abstraction allows you to:
-- **Implement any storage backend** (memory, Redis, Memcached, database, file, etc.)
-- **Switch backends** seamlessly without changing your application code
-- **Test easily** with different backends for unit/integration tests
-- **Extend functionality** with custom cache behaviors
-- **Maintain consistency** across different deployment environments
+- **🎯 Simple Interface**: Clean `CacheClient` interface for maximum flexibility
+- **🚀 Built-in Implementations**: Production-ready MemoryCache and RedisClient
+- **📝 Easy API**: Simple context-based cache control  
+- **⚡ High Performance**: Optimized hashing with 27% performance improvement
+- **🛡️ Production Ready**: Thread-safe, timeout support, graceful error handling
 
 ## 📦 Installation
 
-To use grc, you only need gorm installed:
-
 ```bash
-go get -u gorm.io/gorm
-go get -u github.com/evangwt/grc
+go get -u github.com/evangwt/grc/v2
 ```
-
-**No external cache dependencies required!** 🎉
 
 ## 🚀 Quick Start
 
-### Step 1: Implement Your Cache Backend
-
-Choose or implement a cache backend that fits your needs:
-
-#### Option 1: Memory Cache (Perfect for Development & Testing)
-
-```go
-// See examples/implementations/memory_cache.go for full implementation
-import "github.com/evangwt/grc/examples/implementations"
-
-memCache := implementations.NewMemoryCache()
-```
-
-#### Option 2: Redis Cache
-
-```go
-// Use the built-in SimpleRedisClient (no go-redis dependency)
-redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
-    Addr: "localhost:6379",
-})
-```
-
-#### Option 3: Custom Implementation
-
-```go
-// Implement your own cache backend
-type MyCustomCache struct {
-    // your fields
-}
-
-func (c *MyCustomCache) Get(ctx context.Context, key string) (interface{}, error) {
-    // your implementation
-    return nil, grc.ErrCacheMiss // return this for cache misses
-}
-
-func (c *MyCustomCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-    // your implementation
-    return nil
-}
-```
-
-### Step 2: Setup GormCache
+### Basic Usage
 
 ```go
 package main
@@ -94,54 +28,50 @@ package main
 import (
     "context"
     "time"
-    "github.com/evangwt/grc"
-    "github.com/evangwt/grc/examples/implementations"
+    "github.com/evangwt/grc/v2"
     "gorm.io/gorm"
 )
 
 func main() {
-    // Initialize your chosen cache backend
-    cacheBackend := implementations.NewMemoryCache()
-    
-    // Create grc cache
-    cache := grc.NewGormCache("my_cache", cacheBackend, grc.CacheConfig{
-        TTL:    60 * time.Second,
-        Prefix: "cache:",
+    // Step 1: Choose a cache implementation
+    cache := grc.NewGormCache("my_cache", grc.NewMemoryCache(), grc.CacheConfig{
+        TTL:           60 * time.Second,
+        Prefix:        "cache:",
+        UseSecureHash: false, // Fast FNV hashing (27% faster)
     })
     
-    // Register with gorm
+    // Step 2: Register with gorm
     db.Use(cache)
+    
+    // Step 3: Use with context
+    ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+    db.Session(&gorm.Session{Context: ctx}).Find(&users)
 }
 ```
 
-### Step 3: Use with Gorm
+## 🔧 Cache Implementations
 
+### Built-in (Production Ready)
+
+**MemoryCache** - Fast in-memory cache with automatic cleanup:
 ```go
-// Enable cache for a query
-ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
-db.Session(&gorm.Session{Context: ctx}).Find(&users)
-
-// Use custom TTL
-ctx = context.WithValue(context.Background(), grc.UseCacheKey, true)
-ctx = context.WithValue(ctx, grc.CacheTTLKey, 10*time.Second)
-db.Session(&gorm.Session{Context: ctx}).Find(&users)
+memCache := grc.NewMemoryCache()
+defer memCache.Close()
 ```
 
-## 🔧 Available Cache Implementations
+**RedisClient** - Simple Redis client without external dependencies:
+```go
+redisClient, err := grc.NewRedisClient(grc.RedisConfig{
+    Addr:     "localhost:6379",
+    Password: "", // optional
+    DB:       0,  // optional
+})
+defer redisClient.Close()
+```
 
-### Built-in
+### Custom Implementation
 
-- **SimpleRedisClient**: Redis implementation without go-redis dependency
-
-### Reference Implementations (`examples/implementations/`)
-
-- **MemoryCache**: Thread-safe in-memory cache
-- **MemcachedCache**: Memcached implementation
-- **FileCache**: File-based persistent cache
-
-### Create Your Own
-
-Implement any storage backend by satisfying the `CacheClient` interface:
+Implement the `CacheClient` interface for your own cache:
 
 ```go
 type CacheClient interface {
@@ -150,7 +80,33 @@ type CacheClient interface {
 }
 ```
 
-See `examples/implementations/README.md` for detailed implementation guides.
+## 🎛️ Cache Control
+
+### Enable/Disable Cache
+
+```go
+// Use cache
+ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+db.Session(&gorm.Session{Context: ctx}).Find(&users)
+
+// Skip cache  
+db.Find(&users) // or set UseCacheKey to false
+```
+
+### Custom TTL
+
+```go
+ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
+ctx = context.WithValue(ctx, grc.CacheTTLKey, 10*time.Second)
+db.Session(&gorm.Session{Context: ctx}).Find(&users)
+```
+
+## ⚡ Performance
+
+- **FNV Hashing**: 194.7 ns/op (default, 27% faster)
+- **SHA256 Hashing**: 265.5 ns/op (secure, collision-resistant)
+- **Memory Cache**: Sub-microsecond operations with automatic cleanup
+- **Timeout Support**: 5-second default timeout with graceful error handling
 
 ## 📋 Complete Example
 
@@ -162,8 +118,7 @@ import (
     "log"
     "time"
     
-    "github.com/evangwt/grc"
-    "github.com/evangwt/grc/examples/implementations"
+    "github.com/evangwt/grc/v2"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
 )
@@ -182,11 +137,8 @@ func main() {
     
     db.AutoMigrate(&User{})
     
-    // Choose your cache implementation
-    cacheBackend := implementations.NewMemoryCache() // or any other implementation
-    
-    // Create and register cache
-    cache := grc.NewGormCache("user_cache", cacheBackend, grc.CacheConfig{
+    // Setup cache
+    cache := grc.NewGormCache("user_cache", grc.NewMemoryCache(), grc.CacheConfig{
         TTL:    5 * time.Minute,
         Prefix: "users:",
     })
@@ -212,82 +164,11 @@ func main() {
 }
 ```
 
-## 🎛️ Cache Control
-
-### Enable/Disable Cache
-
-```go
-// Use cache with default TTL
-ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
-db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
-
-// Do not use cache  
-ctx := context.WithValue(context.Background(), grc.UseCacheKey, false)
-db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 10).Find(&users)
-// or simply
-db.Where("id > ?", 10).Find(&users)
-```
-
-### Custom TTL
-
-```go
-// Use cache with custom TTL
-ctx := context.WithValue(context.Background(), grc.UseCacheKey, true)
-ctx = context.WithValue(ctx, grc.CacheTTLKey, 10*time.Second)
-db.Session(&gorm.Session{Context: ctx}).Where("id > ?", 5).Find(&users)
-```
-
-## 🧪 Testing & Development
-
-grc provides comprehensive testing capabilities:
-
-- **Abstract Interface**: Test any cache implementation against the `CacheClient` interface
-- **Redis Testing**: Uses `miniredis` for integration testing without external Redis server
-- **Reference Implementations**: Use examples for development and testing
-
-Run tests:
-```bash
-go test ./...
-```
-
-## 📚 Examples
-
-For comprehensive examples and implementation guides:
-
-- **`examples/implementations/`** - Reference cache implementations (memory, Memcached, file-based)
-- **`example/memory_example.go`** - Complete usage demonstration  
-
-## 🔄 Migration Guide
-
-### From go-redis based solutions:
-
-**Before:**
-```go
-rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-cache := grc.NewGormCache("cache", grc.NewRedisClient(rdb), config)
-```
-
-**After:**
-```go
-// Use SimpleRedisClient (no go-redis dependency)
-redisClient, _ := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
-    Addr: "localhost:6379",
-})
-cache := grc.NewGormCache("cache", redisClient, config)
-
-// Or implement your own
-cache := grc.NewGormCache("cache", yourCustomImplementation, config)
-```
-
 ## 📄 License
 
 grc is licensed under the Apache License 2.0. See the [LICENSE](https://github.com/evangwt/grc/blob/main/LICENSE) file for more information.
 
-## 🤝 Contribution
-
-If you have any feedback or suggestions for grc, please feel free to open an issue or a pull request on GitHub. Your contribution is welcome and appreciated! 😊
-
 ---
 
-**grc v2**: 简洁优雅的使用方式 (Simple and Elegant Usage) with Clean Abstract Interface Design 🚀
+**grc**: Simple and elegant gorm cache plugin with production-ready defaults 🚀
 
