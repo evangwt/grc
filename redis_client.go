@@ -1,4 +1,4 @@
-package implementations
+package grc
 
 import (
 	"bufio"
@@ -10,13 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/evangwt/grc"
 )
 
-// SimpleRedisClient is a simple Redis client implementation without external dependencies
-// This is a reference implementation showing how to create a Redis cache client
-type SimpleRedisClient struct {
+// RedisClient is a simple Redis client implementation without external dependencies
+type RedisClient struct {
 	addr         string
 	password     string
 	db           int
@@ -27,22 +24,22 @@ type SimpleRedisClient struct {
 	connected    bool
 }
 
-// SimpleRedisConfig contains configuration for the simple Redis client
-type SimpleRedisConfig struct {
+// RedisConfig contains configuration for the Redis client
+type RedisConfig struct {
 	Addr        string        // Redis server address (e.g., "localhost:6379")
 	Password    string        // Redis password (optional)
 	DB          int           // Redis database number (default: 0)
 	MaxIdleTime time.Duration // Maximum time connection can be idle (default: 5 minutes)
 }
 
-// NewSimpleRedisClient creates a new simple Redis client
-func NewSimpleRedisClient(config SimpleRedisConfig) (*SimpleRedisClient, error) {
+// NewRedisClient creates a new Redis client
+func NewRedisClient(config RedisConfig) (*RedisClient, error) {
 	maxIdleTime := config.MaxIdleTime
 	if maxIdleTime == 0 {
 		maxIdleTime = 5 * time.Minute // Default idle time
 	}
 
-	client := &SimpleRedisClient{
+	client := &RedisClient{
 		addr:        config.Addr,
 		password:    config.Password,
 		db:          config.DB,
@@ -58,7 +55,7 @@ func NewSimpleRedisClient(config SimpleRedisConfig) (*SimpleRedisClient, error) 
 }
 
 // connect establishes a connection to Redis
-func (r *SimpleRedisClient) connect() error {
+func (r *RedisClient) connect() error {
 	conn, err := net.Dial("tcp", r.addr)
 	if err != nil {
 		return err
@@ -92,7 +89,7 @@ func (r *SimpleRedisClient) connect() error {
 }
 
 // ensureConnection checks if connection is alive and reconnects if needed
-func (r *SimpleRedisClient) ensureConnection() error {
+func (r *RedisClient) ensureConnection() error {
 	// Check if connection is too old or not established
 	if !r.connected || r.conn == nil || time.Since(r.lastUsed) > r.maxIdleTime {
 		if r.conn != nil {
@@ -104,7 +101,7 @@ func (r *SimpleRedisClient) ensureConnection() error {
 }
 
 // sendCommand sends a command to Redis and returns the response
-func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, error) {
+func (r *RedisClient) sendCommand(cmd string, args ...string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -156,7 +153,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 			return "", err
 		}
 		if length == -1 {
-			return "", grc.ErrCacheMiss // NULL bulk string
+			return "", ErrCacheMiss // NULL bulk string
 		}
 		
 		data := make([]byte, length)
@@ -176,7 +173,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 }
 
 // Get retrieves a value from Redis
-func (r *SimpleRedisClient) Get(ctx context.Context, key string) (interface{}, error) {
+func (r *RedisClient) Get(ctx context.Context, key string) (interface{}, error) {
 	value, err := r.sendCommand("GET", key)
 	if err != nil {
 		return nil, err
@@ -186,7 +183,7 @@ func (r *SimpleRedisClient) Get(ctx context.Context, key string) (interface{}, e
 }
 
 // Set stores a value in Redis with TTL
-func (r *SimpleRedisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (r *RedisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -203,7 +200,7 @@ func (r *SimpleRedisClient) Set(ctx context.Context, key string, value interface
 }
 
 // Close closes the Redis connection
-func (r *SimpleRedisClient) Close() error {
+func (r *RedisClient) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	

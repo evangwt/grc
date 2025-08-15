@@ -1,17 +1,14 @@
-package implementations
+package grc
 
 import (
 	"context"
 	"encoding/json"
 	"sync"
 	"time"
-	
-	"github.com/evangwt/grc"
 )
 
 // MemoryCache is a production-ready in-memory cache implementation
 // It provides thread-safe operations and automatic cleanup of expired items
-// This demonstrates how to implement the grc.CacheClient interface
 type MemoryCache struct {
 	data     map[string]*memoryCacheItem
 	mu       sync.RWMutex
@@ -42,12 +39,12 @@ func (m *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) 
 
 	item, exists := m.data[key]
 	if !exists {
-		return nil, grc.ErrCacheMiss
+		return nil, ErrCacheMiss
 	}
 
 	// Check if expired
 	if time.Now().After(item.expiry) {
-		return nil, grc.ErrCacheMiss
+		return nil, ErrCacheMiss
 	}
 
 	return item.value, nil
@@ -65,7 +62,7 @@ func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 
 	// Check if cache is stopped
 	if m.stopped {
-		return grc.ErrCacheMiss // Return cache miss to indicate cache is not operational
+		return ErrCacheMiss // Return cache miss to indicate cache is not operational
 	}
 
 	m.data[key] = &memoryCacheItem{
