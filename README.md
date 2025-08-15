@@ -13,6 +13,11 @@ grc is a gorm plugin that provides a **简洁优雅的使用方式** (simple and
 - **🧪 Comprehensive Testing**: Full test coverage with miniredis integration
 - **⚡ Production Ready**: Thread-safe interface design suitable for high-concurrency
 - **📚 Rich Examples**: Reference implementations for common cache backends
+- **🏃‍♂️ High Performance**: Optimized hashing (FNV vs SHA256) with 27% performance improvement
+- **🔧 Enhanced Error Handling**: Timeout support with graceful error handling
+- **🔄 Auto-Reconnection**: Redis client with automatic connection management
+- **🧹 Automatic Cleanup**: Memory cache with background cleanup of expired items
+- **🛡️ Type Safety**: Type-safe context keys with proper error definitions
 
 ## 🏗️ Architecture
 
@@ -32,6 +37,36 @@ This elegant abstraction allows you to:
 - **Extend functionality** with custom cache behaviors
 - **Maintain consistency** across different deployment environments
 
+## ⚡ Performance Optimizations
+
+grc includes several performance optimizations for production use:
+
+### Configurable Hashing Strategy
+```go
+cache := grc.NewGormCache("my_cache", backend, grc.CacheConfig{
+    TTL:           60 * time.Second,
+    Prefix:        "cache:",
+    UseSecureHash: false, // Fast FNV hashing (default)
+    // UseSecureHash: true,  // Secure SHA256 hashing (for collision resistance)
+})
+```
+
+**Benchmark Results:**
+- **FNV1a Hashing**: 194.7 ns/op, 24 B/op, 2 allocs/op
+- **SHA256 Hashing**: 265.5 ns/op, 217 B/op, 3 allocs/op
+- **Performance Gain**: ~27% faster with FNV hashing
+
+### Memory Cache Performance
+- **Cache Hit**: ~174 ns/op with minimal allocations
+- **Cache Miss**: ~47 ns/op with zero allocations  
+- **Cache Set**: ~1536 ns/op for complex objects
+- **Automatic Cleanup**: Background cleanup of expired items
+
+### Enhanced Error Handling
+- **Timeout Support**: 5-second default timeout for cache operations
+- **Graceful Degradation**: Cache failures don't break database queries
+- **Type-Safe Errors**: `ErrCacheMiss` and `ErrCacheTimeout` for proper handling
+
 ## 📦 Installation
 
 To use grc, you only need gorm installed:
@@ -49,7 +84,15 @@ go get -u github.com/evangwt/grc
 
 Choose or implement a cache backend that fits your needs:
 
-#### Option 1: Memory Cache (Perfect for Development & Testing)
+#### Option 1: Built-in Memory Cache (Production Ready)
+
+```go
+// Use the built-in production-ready memory cache
+memCache := grc.NewMemoryCache() // Includes automatic cleanup and graceful shutdown
+defer memCache.Close() // Optional: explicit cleanup
+```
+
+#### Option 2: Custom Memory Cache (For Advanced Use Cases)
 
 ```go
 // See examples/implementations/memory_cache.go for full implementation
@@ -58,16 +101,20 @@ import "github.com/evangwt/grc/examples/implementations"
 memCache := implementations.NewMemoryCache()
 ```
 
-#### Option 2: Redis Cache
+#### Option 3: Redis Cache (Enhanced with Auto-Reconnection)
 
 ```go
 // Use the built-in SimpleRedisClient (no go-redis dependency)
 redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
-    Addr: "localhost:6379",
+    Addr:        "localhost:6379",
+    Password:    "", // optional
+    DB:          0,  // optional
+    MaxIdleTime: 5 * time.Minute, // optional: auto-reconnect after idle time
 })
+defer redisClient.Close()
 ```
 
-#### Option 3: Custom Implementation
+#### Option 4: Custom Implementation
 
 ```go
 // Implement your own cache backend
@@ -101,12 +148,13 @@ import (
 
 func main() {
     // Initialize your chosen cache backend
-    cacheBackend := implementations.NewMemoryCache()
+    cacheBackend := grc.NewMemoryCache() // Use built-in production-ready cache
     
-    // Create grc cache
+    // Create grc cache with performance optimizations
     cache := grc.NewGormCache("my_cache", cacheBackend, grc.CacheConfig{
-        TTL:    60 * time.Second,
-        Prefix: "cache:",
+        TTL:           60 * time.Second,
+        Prefix:        "cache:",
+        UseSecureHash: false, // Use fast FNV hashing (27% faster than SHA256)
     })
     
     // Register with gorm
