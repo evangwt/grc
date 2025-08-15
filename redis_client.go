@@ -14,26 +14,36 @@ import (
 
 // SimpleRedisClient is a simple Redis client implementation without external dependencies
 type SimpleRedisClient struct {
-	addr     string
-	password string
-	db       int
-	conn     net.Conn
-	mu       sync.Mutex
+	addr         string
+	password     string
+	db           int
+	conn         net.Conn
+	mu           sync.Mutex
+	lastUsed     time.Time
+	maxIdleTime  time.Duration
+	connected    bool
 }
 
 // SimpleRedisConfig contains configuration for the simple Redis client
 type SimpleRedisConfig struct {
-	Addr     string // Redis server address (e.g., "localhost:6379")
-	Password string // Redis password (optional)
-	DB       int    // Redis database number (default: 0)
+	Addr        string        // Redis server address (e.g., "localhost:6379")
+	Password    string        // Redis password (optional)
+	DB          int           // Redis database number (default: 0)
+	MaxIdleTime time.Duration // Maximum time connection can be idle (default: 5 minutes)
 }
 
 // NewSimpleRedisClient creates a new simple Redis client
 func NewSimpleRedisClient(config SimpleRedisConfig) (*SimpleRedisClient, error) {
+	maxIdleTime := config.MaxIdleTime
+	if maxIdleTime == 0 {
+		maxIdleTime = 5 * time.Minute // Default idle time
+	}
+
 	client := &SimpleRedisClient{
-		addr:     config.Addr,
-		password: config.Password,
-		db:       config.DB,
+		addr:        config.Addr,
+		password:    config.Password,
+		db:          config.DB,
+		maxIdleTime: maxIdleTime,
 	}
 
 	err := client.connect()
@@ -52,12 +62,15 @@ func (r *SimpleRedisClient) connect() error {
 	}
 
 	r.conn = conn
+	r.lastUsed = time.Now()
+	r.connected = true
 
 	// Authenticate if password is provided
 	if r.password != "" {
 		_, err = r.sendCommand("AUTH", r.password)
 		if err != nil {
 			r.conn.Close()
+			r.connected = false
 			return fmt.Errorf("authentication failed: %w", err)
 		}
 	}
@@ -67,6 +80,7 @@ func (r *SimpleRedisClient) connect() error {
 		_, err = r.sendCommand("SELECT", strconv.Itoa(r.db))
 		if err != nil {
 			r.conn.Close()
+			r.connected = false
 			return fmt.Errorf("failed to select database: %w", err)
 		}
 	}
@@ -74,10 +88,29 @@ func (r *SimpleRedisClient) connect() error {
 	return nil
 }
 
+// ensureConnection checks if connection is alive and reconnects if needed
+func (r *SimpleRedisClient) ensureConnection() error {
+	// Check if connection is too old or not established
+	if !r.connected || r.conn == nil || time.Since(r.lastUsed) > r.maxIdleTime {
+		if r.conn != nil {
+			r.conn.Close()
+		}
+		return r.connect()
+	}
+	return nil
+}
+
 // sendCommand sends a command to Redis and returns the response
 func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Ensure connection is available
+	if err := r.ensureConnection(); err != nil {
+		return "", err
+	}
+
+	r.lastUsed = time.Now()
 
 	// Build Redis protocol command
 	cmdArgs := []string{cmd}
@@ -92,6 +125,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 	// Send command
 	_, err := r.conn.Write([]byte(command))
 	if err != nil {
+		r.connected = false
 		return "", err
 	}
 
@@ -99,6 +133,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 	reader := bufio.NewReader(r.conn)
 	response, err := reader.ReadString('\n')
 	if err != nil {
+		r.connected = false
 		return "", err
 	}
 
@@ -124,6 +159,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 		data := make([]byte, length)
 		_, err = reader.Read(data)
 		if err != nil {
+			r.connected = false
 			return "", err
 		}
 		
@@ -165,8 +201,14 @@ func (r *SimpleRedisClient) Set(ctx context.Context, key string, value interface
 
 // Close closes the Redis connection
 func (r *SimpleRedisClient) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
+	r.connected = false
 	if r.conn != nil {
-		return r.conn.Close()
+		err := r.conn.Close()
+		r.conn = nil
+		return err
 	}
 	return nil
 }
