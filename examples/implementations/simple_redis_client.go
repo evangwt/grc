@@ -1,4 +1,4 @@
-package grc
+package implementations
 
 import (
 	"bufio"
@@ -10,9 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/evangwt/grc"
 )
 
 // SimpleRedisClient is a simple Redis client implementation without external dependencies
+// This is a reference implementation showing how to create a Redis cache client
 type SimpleRedisClient struct {
 	addr         string
 	password     string
@@ -153,7 +156,7 @@ func (r *SimpleRedisClient) sendCommand(cmd string, args ...string) (string, err
 			return "", err
 		}
 		if length == -1 {
-			return "", ErrCacheMiss // NULL bulk string
+			return "", grc.ErrCacheMiss // NULL bulk string
 		}
 		
 		data := make([]byte, length)

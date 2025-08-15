@@ -120,8 +120,7 @@ func BenchmarkCacheConfig(b *testing.B) {
 
 // BenchmarkErrorHandling tests the performance impact of improved error handling
 func BenchmarkErrorHandling(b *testing.B) {
-	cache := NewMemoryCache()
-	defer cache.Close()
+	cache := newTestMemoryCache()
 	
 	ctx := context.Background()
 	key := "benchmark_key"
@@ -156,8 +155,7 @@ func BenchmarkErrorHandling(b *testing.B) {
 
 // TestTimeoutHandling verifies the new timeout handling works correctly
 func TestTimeoutHandling(t *testing.T) {
-	cache := NewMemoryCache()
-	defer cache.Close()
+	cache := newTestMemoryCache()
 	
 	// Test with timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)

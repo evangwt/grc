@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/evangwt/grc"
+	"github.com/evangwt/grc/examples/implementations"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -35,11 +36,11 @@ func main() {
 	db.AutoMigrate(User{})
 
 	// =====================================================
-	// NEW APPROACH: No external dependencies required!
+	// INTERFACE-FIRST APPROACH: Use your own implementations!
 	// =====================================================
 	
-	// Option 1: Use MemoryCache (built-in, no dependencies, with automatic cleanup)
-	memoryCache := grc.NewGormCache("memory_cache", grc.NewMemoryCache(), grc.CacheConfig{
+	// Option 1: Use MemoryCache from examples (reference implementation)
+	memoryCache := grc.NewGormCache("memory_cache", implementations.NewMemoryCache(), grc.CacheConfig{
 		TTL:           60 * time.Second,
 		Prefix:        "mem:",
 		UseSecureHash: false, // Use fast FNV hashing for better performance
@@ -49,8 +50,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Option 2: Use SimpleRedisClient (no go-redis dependency, with auto-reconnection)
-	// redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
+	// Option 2: Use SimpleRedisClient from examples (reference implementation)
+	// redisClient, err := implementations.NewSimpleRedisClient(implementations.SimpleRedisConfig{
 	//     Addr:        "localhost:6379",
 	//     Password:    "", // optional
 	//     DB:          0,  // optional
@@ -101,6 +102,7 @@ func main() {
 	log.Printf("grc supports both fast FNV hashing and secure SHA256 hashing")
 	log.Printf("Fast hashing provides ~27%% better performance for most use cases")
 	log.Printf("Secure hashing offers collision resistance for high-security scenarios")
+	log.Printf("Reference implementations provided in examples/ - use your own for production!")
 
 	// Show cache name
 	log.Printf("Cache '%s' configured successfully", memoryCache.Name())

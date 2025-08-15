@@ -10,13 +10,11 @@ grc is a gorm plugin that provides a **简洁优雅的使用方式** (simple and
 - **🔌 Pluggable Architecture**: Implement any cache backend (memory, Redis, Memcached, database, file, etc.)
 - **🚀 Zero Required Dependencies**: Core library has no external cache dependencies
 - **📝 Simple Context-Based API**: Control cache behavior through gorm session context
-- **🧪 Comprehensive Testing**: Full test coverage with miniredis integration
+- **🧪 Comprehensive Testing**: Full test coverage with production-ready examples
 - **⚡ Production Ready**: Thread-safe interface design suitable for high-concurrency
 - **📚 Rich Examples**: Reference implementations for common cache backends
 - **🏃‍♂️ High Performance**: Optimized hashing (FNV vs SHA256) with 27% performance improvement
 - **🔧 Enhanced Error Handling**: Timeout support with graceful error handling
-- **🔄 Auto-Reconnection**: Redis client with automatic connection management
-- **🧹 Automatic Cleanup**: Memory cache with background cleanup of expired items
 - **🛡️ Type Safety**: Type-safe context keys with proper error definitions
 
 ## 🏗️ Architecture
@@ -82,30 +80,69 @@ go get -u github.com/evangwt/grc
 
 ### Step 1: Implement Your Cache Backend
 
-Choose or implement a cache backend that fits your needs:
+The power of grc lies in its interface-first design. You can use any cache implementation that satisfies the `CacheClient` interface:
 
-#### Option 1: Built-in Memory Cache (Production Ready)
+#### Option 1: Use Popular Cache Libraries
 
 ```go
-// Use the built-in production-ready memory cache
-memCache := grc.NewMemoryCache() // Includes automatic cleanup and graceful shutdown
-defer memCache.Close() // Optional: explicit cleanup
+// Example: Wrapping go-redis (popular Redis library)
+type GoRedisCache struct {
+    client *redis.Client
+}
+
+func (r *GoRedisCache) Get(ctx context.Context, key string) (interface{}, error) {
+    val, err := r.client.Get(ctx, key).Result()
+    if err != nil {
+        if err == redis.Nil {
+            return nil, grc.ErrCacheMiss
+        }
+        return nil, err
+    }
+    return []byte(val), nil
+}
+
+func (r *GoRedisCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+    data, err := json.Marshal(value)
+    if err != nil {
+        return err
+    }
+    return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+// Example: Wrapping go-cache (popular memory cache)
+type GoCacheWrapper struct {
+    cache *cache.Cache
+}
+
+func (g *GoCacheWrapper) Get(ctx context.Context, key string) (interface{}, error) {
+    if value, found := g.cache.Get(key); found {
+        return value, nil
+    }
+    return nil, grc.ErrCacheMiss
+}
+
+func (g *GoCacheWrapper) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+    data, err := json.Marshal(value)
+    if err != nil {
+        return err
+    }
+    g.cache.Set(key, data, ttl)
+    return nil
+}
 ```
 
-#### Option 2: Custom Memory Cache (For Advanced Use Cases)
+#### Option 2: Reference Implementations (examples/implementations/)
 
 ```go
-// See examples/implementations/memory_cache.go for full implementation
+// Use reference implementations for testing and development
 import "github.com/evangwt/grc/examples/implementations"
 
+// Memory cache reference implementation
 memCache := implementations.NewMemoryCache()
-```
+defer memCache.Close()
 
-#### Option 3: Redis Cache (Enhanced with Auto-Reconnection)
-
-```go
-// Use the built-in SimpleRedisClient (no go-redis dependency)
-redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
+// Redis reference implementation (no external dependencies)
+redisClient, err := implementations.NewSimpleRedisClient(implementations.SimpleRedisConfig{
     Addr:        "localhost:6379",
     Password:    "", // optional
     DB:          0,  // optional
@@ -114,7 +151,7 @@ redisClient, err := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
 defer redisClient.Close()
 ```
 
-#### Option 4: Custom Implementation
+#### Option 3: Custom Implementation
 
 ```go
 // Implement your own cache backend
@@ -148,7 +185,8 @@ import (
 
 func main() {
     // Initialize your chosen cache backend
-    cacheBackend := grc.NewMemoryCache() // Use built-in production-ready cache
+    // Use YOUR implementation - the examples are just references!
+    cacheBackend := implementations.NewMemoryCache() // Reference implementation for development
     
     // Create grc cache with performance optimizations
     cache := grc.NewGormCache("my_cache", cacheBackend, grc.CacheConfig{
@@ -177,15 +215,33 @@ db.Session(&gorm.Session{Context: ctx}).Find(&users)
 
 ## 🔧 Available Cache Implementations
 
-### Built-in
+### Your Own Implementations (Recommended)
 
-- **SimpleRedisClient**: Redis implementation without go-redis dependency
+The best approach is to use your preferred cache libraries:
+
+- **go-redis**: Popular Redis client library
+- **go-cache**: Thread-safe in-memory cache  
+- **BigCache**: Fast, concurrent, evicting in-memory cache
+- **FreeCache**: Zero GC overhead cache
+- **Memcached**: Official memcached client
+- **Database cache**: Use your existing database as cache
+- **File cache**: Custom file-based cache
 
 ### Reference Implementations (`examples/implementations/`)
 
-- **MemoryCache**: Thread-safe in-memory cache
-- **MemcachedCache**: Memcached implementation
-- **FileCache**: File-based persistent cache
+These are provided as examples and starting points:
+
+- **MemoryCache**: Production-ready in-memory cache with cleanup
+- **SimpleRedisClient**: Redis implementation without go-redis dependency
+- **MemcachedCache**: Memcached implementation example
+- **FileCache**: File-based persistent cache example
+
+### Integration Examples
+
+See `examples/implementations/popular_libraries.go` for examples of how to wrap:
+- go-redis
+- BigCache
+- Other popular cache libraries
 
 ### Create Your Own
 
@@ -231,7 +287,8 @@ func main() {
     db.AutoMigrate(&User{})
     
     // Choose your cache implementation
-    cacheBackend := implementations.NewMemoryCache() // or any other implementation
+    cacheBackend := implementations.NewMemoryCache() // Reference implementation
+    defer cacheBackend.Close()
     
     // Create and register cache
     cache := grc.NewGormCache("user_cache", cacheBackend, grc.CacheConfig{
@@ -317,14 +374,38 @@ cache := grc.NewGormCache("cache", grc.NewRedisClient(rdb), config)
 
 **After:**
 ```go
-// Use SimpleRedisClient (no go-redis dependency)
-redisClient, _ := grc.NewSimpleRedisClient(grc.SimpleRedisConfig{
+// Option 1: Use your go-redis client directly (RECOMMENDED)
+type MyGoRedisCache struct {
+    client *redis.Client
+}
+
+func (r *MyGoRedisCache) Get(ctx context.Context, key string) (interface{}, error) {
+    val, err := r.client.Get(ctx, key).Result()
+    if err != nil {
+        if err == redis.Nil {
+            return nil, grc.ErrCacheMiss
+        }
+        return nil, err
+    }
+    return []byte(val), nil
+}
+
+func (r *MyGoRedisCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+    data, err := json.Marshal(value)
+    if err != nil {
+        return err
+    }
+    return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+myCache := &MyGoRedisCache{client: rdb}
+cache := grc.NewGormCache("cache", myCache, config)
+
+// Option 2: Use reference implementation (for testing/development)
+redisClient, _ := implementations.NewSimpleRedisClient(implementations.SimpleRedisConfig{
     Addr: "localhost:6379",
 })
 cache := grc.NewGormCache("cache", redisClient, config)
-
-// Or implement your own
-cache := grc.NewGormCache("cache", yourCustomImplementation, config)
 ```
 
 ## 📄 License
@@ -338,4 +419,6 @@ If you have any feedback or suggestions for grc, please feel free to open an iss
 ---
 
 **grc v2**: 简洁优雅的使用方式 (Simple and Elegant Usage) with Clean Abstract Interface Design 🚀
+
+**Why use grc?** Because your cache implementation is YOUR choice. grc provides the elegant interface - you provide the cache that fits your needs.
 

@@ -9,22 +9,26 @@ import (
 	"github.com/evangwt/grc"
 )
 
-// MemoryCache is a reference implementation of an in-memory cache
+// MemoryCache is a production-ready in-memory cache implementation
+// It provides thread-safe operations and automatic cleanup of expired items
 // This demonstrates how to implement the grc.CacheClient interface
 type MemoryCache struct {
-	data map[string]*cacheItem
-	mu   sync.RWMutex
+	data     map[string]*memoryCacheItem
+	mu       sync.RWMutex
+	stopChan chan struct{}
+	stopped  bool
 }
 
-type cacheItem struct {
+type memoryCacheItem struct {
 	value  []byte
 	expiry time.Time
 }
 
-// NewMemoryCache creates a new in-memory cache instance
+// NewMemoryCache creates a new in-memory cache instance with automatic cleanup
 func NewMemoryCache() *MemoryCache {
 	mc := &MemoryCache{
-		data: make(map[string]*cacheItem),
+		data:     make(map[string]*memoryCacheItem),
+		stopChan: make(chan struct{}),
 	}
 	// Start cleanup goroutine
 	go mc.cleanup()
@@ -59,7 +63,12 @@ func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.data[key] = &cacheItem{
+	// Check if cache is stopped
+	if m.stopped {
+		return grc.ErrCacheMiss // Return cache miss to indicate cache is not operational
+	}
+
+	m.data[key] = &memoryCacheItem{
 		value:  data,
 		expiry: time.Now().Add(ttl),
 	}
@@ -67,7 +76,20 @@ func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 	return nil
 }
 
-// cleanup removes expired items from the cache
+// Close stops the cleanup goroutine and clears the cache
+func (m *MemoryCache) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.stopped {
+		m.stopped = true
+		close(m.stopChan)
+		m.data = nil
+	}
+	return nil
+}
+
+// cleanup removes expired items from the cache periodically
 func (m *MemoryCache) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -75,14 +97,33 @@ func (m *MemoryCache) cleanup() {
 	for {
 		select {
 		case <-ticker.C:
-			m.mu.Lock()
-			now := time.Now()
-			for key, item := range m.data {
-				if now.After(item.expiry) {
-					delete(m.data, key)
-				}
-			}
-			m.mu.Unlock()
+			m.cleanupExpired()
+		case <-m.stopChan:
+			return
 		}
 	}
+}
+
+// cleanupExpired removes expired items (internal method)
+func (m *MemoryCache) cleanupExpired() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.stopped {
+		return
+	}
+
+	now := time.Now()
+	for key, item := range m.data {
+		if now.After(item.expiry) {
+			delete(m.data, key)
+		}
+	}
+}
+
+// Size returns the current number of items in the cache
+func (m *MemoryCache) Size() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.data)
 }
